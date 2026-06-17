@@ -77,6 +77,28 @@ subprojects {
     }
 }
 
+tasks.register("printSWMVersion") {
+    doLast {
+        println("SWM dependencies added successfully")
+    }
+}
+
+// Add SWM dependencies
+subprojects {
+    dependencies {
+        // Only add to purpur-server (index 1) since it needs flow-nbt and zstd
+        if (project.name == "purpur-server") {
+            api("com.flowpowered:flow-nbt:2.0.0-1")
+            implementation("com.github.luben:zstd-jni:1.5.5-11")
+            compileOnly("org.projectlombok:lombok:1.18.30")
+            annotationProcessor("org.projectlombok:lombok:1.18.30")
+        }
+        
+        // Common dependencies for both api and server
+        testImplementation("junit:junit:4.13.2")
+    }
+}
+
 tasks.register("printMinecraftVersion") {
     doLast {
         println(providers.gradleProperty("mcVersion").get().trim())
