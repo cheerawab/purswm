@@ -47,7 +47,7 @@ jobs:
       - name: Run Gradle Tasks
         run: |
           cd Purpur
-          ./gradlew tasks --no-daemon --console=plain 2>&1 || true
+          ./gradlew tasks --no-daemon --console=plain
 
       - name: Upload Build Report
         if: failure()
