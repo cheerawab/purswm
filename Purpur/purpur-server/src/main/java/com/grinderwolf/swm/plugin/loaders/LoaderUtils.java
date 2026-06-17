@@ -8,50 +8,34 @@ import com.grinderwolf.swm.api.exceptions.NewerFormatException;
 import com.grinderwolf.swm.api.loaders.SlimeLoader;
 import com.grinderwolf.swm.api.utils.SlimeFormat;
 import com.grinderwolf.swm.api.world.SlimeChunk;
+import com.grinderwolf.swm.api.world.SlimeChunkSection;
 import com.grinderwolf.swm.api.world.SlimeWorld;
 import com.grinderwolf.swm.api.world.impl.CraftSlimeChunk;
-import com.grinderwolf.swm.api.world.impl.CraftSlimeChunkSection;
 import com.grinderwolf.swm.api.world.impl.CraftSlimeWorld;
 import com.grinderwolf.swm.api.world.properties.SlimePropertyMap;
+import com.grinderwolf.swm.plugin.log.Logging;
 
 import java.io.*;
 import java.nio.ByteOrder;
 import java.util.*;
 
 /**
- * Utility class for handling Slime Format data.
+ * Loader utilities for Slime World Manager
+ * Handles deserialization of slime world data
  */
 public class LoaderUtils {
 
     /**
-     * Decompress zstd compressed data.
+     * Deserializes a slime world from byte array
      */
-    public static byte[] decompress(byte[] compressed) throws IOException {
-        if (compressed == null || compressed.length == 0) {
-            return new byte[0];
-        }
-        return Zstd.decompress(compressed);
-    }
-
-    /**
-     * Serializes world data to bytes.
-     */
-    public static byte[] serializeWorld(SlimeWorld world) {
-        // Implementation in CraftSlimeWorld.serialize()
-        return world.serialize();
-    }
-
-    /**
-     * Deserializes a world from bytes.
-     */
-    public static SlimeWorld deserialize(
+    public static SlimeWorld deserializeWorld(
             String worldName,
             byte[] data,
             SlimePropertyMap properties,
             boolean readOnly,
             SlimeLoader loader
     ) throws CorruptedWorldException {
-        if (data.length < 13) {
+        if (data == null || data.length < 13) {
             throw new CorruptedWorldException(worldName);
         }
 
@@ -59,7 +43,7 @@ public class LoaderUtils {
             ByteArrayInputStream bais = new ByteArrayInputStream(data);
             DataInputStream input = new DataInputStream(bais);
 
-            // Validate header
+            // Check SLIM format header
             byte[] header = new byte[SlimeFormat.SLIME_HEADER.length];
             input.readFully(header);
 
@@ -67,71 +51,95 @@ public class LoaderUtils {
                 throw new CorruptedWorldException(worldName);
             }
 
-            // Read version
+            // Read magic number and version
             byte version = input.readByte();
+            if (version > SlimeFormat.SLIME_VERSION) {
+                throw new NewerFormatException(version);
+            }
 
-            // Read world properties (should be in extra data, but we have separate properties)
-            Map<Long, SlimeChunk> chunks = new HashMap<>();
-            List<CompoundTag> worldMaps = new ArrayList<>();
-            Map<Byte, byte[]> paletteCache = new HashMap<>();
+            // Read world version
+            byte worldVersion = input.readByte();
 
-            // Read lowest chunk coords
-            short minXShort = input.readShort();
-            short minZShort = input.readShort();
-            int minX = (int) (minXShort & 0xFFFF);
-            int minZ = (int) (minZShort & 0xFFFF);
-
-            // Read width/depth
-            short widthShort = input.readShort();
-            short depthShort = input.readShort();
-            int width = (int) (widthShort & 0xFFFF);
-            int depth = (int) (depthShort & 0xFFFF);
+            // Read chunk coordinates
+            short minX = input.readShort();
+            short minZ = input.readShort();
+            short maxX = input.readShort();
+            short maxZ = input.readShort();
 
             // Read chunk bitmask
-            BitSet chunkBitSet = BitSet.valueOf(
-                    readBytes(input, (int) Math.ceil((width * depth) / 8.0D))
-            );
+            int chunkBitsetSize = (((maxX - minX + 1) * (maxZ - minZ + 1) + 7) / 8);
+            byte[] chunkBitmaskBytes = readBytes(input, chunkBitsetSize);
+            BitSet chunkBitmask = BitSet.valueOf(chunkBitmaskBytes);
+
+            Map<Long, SlimeChunk> chunks = new HashMap<>();
+            Map<Integer, byte[]> paletteCache = new HashMap<>();
 
             // Read chunk data
-            byte[] compressedChunkData = readBytes(input, input.readInt());
+            int compressedChunkLen = input.readInt();
+            int chunkLen = input.readInt();
+            byte[] compressedChunkData = readBytes(input, compressedChunkLen);
+            byte[] chunkData = Zstd.decompress(compressedChunkData);
 
-            // Read tile entities
-            readBytes(input, input.readInt()); // compressed length
-            int tileEntityCount = readInt(input);
+            // Read chunks
+            ByteArrayInputStream chunkBais = new ByteArrayInputStream(chunkData);
+            DataInputStream chunkIn = new DataInputStream(chunkBais);
 
-            // Read entities
-            boolean hasEntities = input.readBoolean();
+            for (int i = 0; i < chunkBitmask.length(); i++) {
+                if (chunkBitmask.get(i)) {
+                    int chunkX = minX + (i % (maxX - minX + 1));
+                    int chunkZ = minZ + (i / (maxX - minX + 1));
 
-            // Read height maps and other chunk data based on version
-            for (int i = 0; i < width * depth; i++) {
-                if (chunkBitSet.get(i)) {
-                    int chunkX = (i % depth) + minX;
-                    int chunkZ = (i / depth) + minZ;
-
-                    // Skip based on format - simplified
                     try {
                         SlimeChunk chunk = deserializeChunk(
-                                input, version, chunkX, chunkZ, worldName,
-                                paletteCache, tileEntityCount, hasEntities
+                                chunkIn, version, worldVersion,
+                                chunkX, chunkZ, worldName, paletteCache
                         );
                         if (chunk != null) {
-                            long key = (((long) chunk.getZ()) << 32) | (chunk.getX() & 0xFFFFFFFFL);
-                            chunks.put(key, chunk);
+                            long chunkKey = makeChunkKey(chunkX, chunkZ);
+                            chunks.put(chunkKey, chunk);
                         }
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        Logging.warning("Failed to deserialize chunk at " + chunkX + ", " + chunkZ, e);
                     }
                 }
             }
 
+            // Read tile entities
+            int tileEntitiesCompressedLen = input.readInt();
+            int tileEntitiesLen = input.readInt();
+            byte[] tileEntitiesCompressed = readBytes(input, tileEntitiesCompressedLen);
+
+            // Read entities
+            boolean hasEntities = input.readBoolean();
+            int entitiesCompressedLen = 0;
+            int entitiesLen = 0;
+            byte[] entitiesCompressed = new byte[0];
+
+            if (hasEntities) {
+                entitiesCompressedLen = input.readInt();
+                entitiesLen = input.readInt();
+                entitiesCompressed = readBytes(input, entitiesCompressedLen);
+            }
+
+            // Read extra data
+            int extraCompressedLen = input.readInt();
+            int extraLen = input.readInt();
+            byte[] extraCompressed = readBytes(input, extraCompressedLen);
+
+            // Read world maps
+            int mapsCompressedLen = input.readInt();
+            int mapsLen = input.readInt();
+            byte[] mapsCompressed = readBytes(input, mapsCompressedLen);
+
             input.close();
 
+            // Create world
             return new CraftSlimeWorld(
                     loader,
                     worldName,
                     chunks,
                     new CompoundTag("", new CompoundMap()),
-                    worldMaps,
+                    new ArrayList<>(),
                     version,
                     properties,
                     readOnly,
@@ -143,78 +151,67 @@ public class LoaderUtils {
         }
     }
 
+    /**
+     * Deserializes a single chunk
+     */
     private static SlimeChunk deserializeChunk(
             DataInputStream input,
             byte version,
+            byte worldVersion,
             int chunkX,
             int chunkZ,
             String worldName,
-            Map<Byte, byte[]> paletteCache,
-            int tileEntityCount,
-            boolean hasEntities
-    ) throws IOException {
-        // Simplified implementation - in real code would deserialization logic
+            Map<Integer, byte[]> paletteCache
+    ) throws IOException, CorruptedWorldException {
         SlimeChunkSection[] sections = new SlimeChunkSection[16];
-        
+
+        // Read section bitmask
         byte[] sectionBitmask = readBytes(input, 2);
-        BitSet sectionBitSet = BitSet.valueOf(sectionBitmask);
+        BitSet sectionBitmaskBits = BitSet.valueOf(sectionBitmask);
 
         for (int i = 0; i < 16; i++) {
-            if (sectionBitSet.get(i)) {
+            if (sectionBitmaskBits.get(i)) {
+                // Read block light
                 boolean hasBlockLight = input.readBoolean();
+
+                byte[] blockLight = null;
                 if (hasBlockLight) {
-                    input.skipBytes(20); // Block light NibbleArray
+                    blockLight = readBytes(input, 2048);
                 }
 
-                // Read block states (simplified)
-                if (version >= 0x04) {
-                    int paletteSize = readInt(input);
+                if (worldVersion >= 4) {
+                    // Read palette and block states (new format)
+                    int paletteSize = input.readInt();
                     for (int p = 0; p < paletteSize; p++) {
-                        int size = readInt(input);
-                        input.skipBytes(size); // skip palette entry
+                        int size = input.readInt();
+                        input.skipBytes(size);
                     }
-                    int blockStatesLen = readInt(input);
-                    for (int s = 0; s < blockStatesLen; s++) {
+
+                    int blockStatesLength = input.readInt();
+                    for (int s = 0; s < blockStatesLength / 8; s++) {
                         input.readLong();
                     }
                 } else {
-                    input.skipBytes(4096); // blocks
-                    input.skipBytes(2048); // data
+                    // Read old format blocks
+                    input.skipBytes(4096);
+                    input.skipBytes(2048);
                 }
 
+                // Read sky light
                 boolean hasSkyLight = input.readBoolean();
                 if (hasSkyLight) {
-                    input.skipBytes(20); // sky light
+                    input.skipBytes(2048);
                 }
 
-                sections[i] = null; // null if no block light
+                sections[i] = new CraftSlimeChunkSection(blockLight, null, null, null, null);
             }
-        }
-
-        // Read extra data (tile entities, entities, etc.)
-        if (tileEntityCount > 0 && input.available() >= 4) {
-            readBytes(input, input.readInt()); // compressed tile entities length
-            if (input.available() > 0) {
-                readBytes(input, input.readInt()); // tile entity data
-            }
-        }
-
-        if (hasEntities && input.available() >= 1) {
-            if (input.readBoolean()) {
-                readBytes(input, input.readInt()); // compressed entities length
-                if (input.available() > 0) {
-                    readBytes(input, input.readInt()); // entities data
-                }
-            }
-        }
-
-        // Read extra data
-        if (input.available() >= 4) {
-            readBytes(input, input.readInt()); // compressed extra
-            readBytes(input, input.readInt()); // extra data
         }
 
         return new CraftSlimeChunk(worldName, chunkX, chunkZ, sections);
+    }
+
+    private static long makeChunkKey(int x, int z) {
+        return (((long) z) << 32) | (x & 0xFFFFFFFFL);
     }
 
     private static byte[] readBytes(DataInputStream input, int length) throws IOException {
@@ -226,7 +223,13 @@ public class LoaderUtils {
         return data;
     }
 
-    private static int readInt(DataInputStream input) throws IOException {
-        return input.readInt() & 0xFFFFFFFF;
+    /**
+     * Decompresses zstd data
+     */
+    public static byte[] decompress(byte[] compressed) throws IOException {
+        if (compressed == null || compressed.length == 0) {
+            return new byte[0];
+        }
+        return Zstd.decompress(compressed);
     }
 }
