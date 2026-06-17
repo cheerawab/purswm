@@ -71,7 +71,8 @@ public class CraftSlimeWorld implements SlimeWorld {
     }
 
     @Override
-    public SlimeWorld clone(String worldName, SlimeLoader loader, boolean lock) throws WorldAlreadyExistsException, IOException {if (name.equals(worldName)) {
+    public SlimeWorld clone(String worldName, SlimeLoader loader, boolean lock) throws WorldAlreadyExistsException, IOException {
+        if (name.equals(worldName)) {
         throw new IllegalArgumentException("The clone world cannot have the same name as the original world!");
     }
 
@@ -296,7 +297,7 @@ public class CraftSlimeWorld implements SlimeWorld {
                     List<CompoundTag> palette = section.getPalette().getValue();
                     outStream.writeInt(palette.size());
 
-                    for (CompoundTag value : palette) {
+                    for (CompoundTag value : palette.getValue()) {
                         byte[] serializedValue = serializeCompoundTag(value);
 
                         outStream.writeInt(serializedValue.length);

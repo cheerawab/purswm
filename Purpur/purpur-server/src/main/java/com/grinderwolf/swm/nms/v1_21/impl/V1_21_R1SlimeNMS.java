@@ -5,8 +5,9 @@ import com.grinderwolf.swm.nms.SlimeNMS;
 import org.bukkit.World;
 import org.bukkit.craftbukkit.CraftWorld;
 
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
+import java.lang.reflect.Constructor;
+import java.util.Collections;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * V1_21 implementation of SlimeNMS for Paper 1.21+ (1.21.7)
@@ -14,124 +15,134 @@ import net.minecraft.server.level.ServerLevel;
  */
 public class V1_21_R1SlimeNMS implements SlimeNMS {
 
+    private static final AtomicReference<Constructor<?>> LEVEL_CONSTRUCTOR = new AtomicReference<>();
+    private SlimeWorld defaultOverworld;
+    private SlimeWorld defaultNether;
+    private SlimeWorld defaultEnd;
+
+    public V1_21_R1SlimeNMS() {
+        initializeConstructors();
+    }
+
+    private void initializeConstructors() {
+        try {
+            // In Paper 1.21, net.minecraft.world.level.Level (formerly ServerLevel) has multiple constructors.
+            // We try to find the one used by Paper for async world generation.
+            for (Constructor<?> constructor : net.minecraft.world.level.Level.class.getDeclaredConstructors()) {
+                Class<?>[] paramTypes = constructor.getParameterTypes();
+                if (paramTypes.length >= 10 &&
+                    net.minecraft.server.MinecraftServer.class.isAssignableFrom(paramTypes[0]) &&
+                    net.minecraft.world.level.storage.WorldData.class.isAssignableFrom(paramTypes[2])) {
+                    
+                    if (LEVEL_CONSTRUCTOR.compareAndSet(null, constructor)) {
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to initialize V1_21_R1SlimeNMS", e);
+        }
+    }
+
     @Override
-    public int getWorldVersion() {
-        return 12;
+    public void setDefaultWorlds(SlimeWorld normalWorld, SlimeWorld netherWorld, SlimeWorld endWorld) {
+        this.defaultOverworld = normalWorld;
+        this.defaultNether = netherWorld;
+        this.defaultEnd = endWorld;
     }
 
     @Override
     public World createWorld(SlimeWorld slimeWorld) {
+        if (LEVEL_CONSTRUCTOR.get() == null) {
+            throw new IllegalStateException("ServerLevel constructor not yet resolved");
+        }
+
+        net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
+
+        net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimKey = getDimensionKey(slimeWorld);
+
+        // Paper 1.21: ServerChunkProvider constructor
+        // ServerChunkProvider(MinecraftServer server, ServerLevelServer level, 
+        //                   ServerChunkCacheSettings settings, 
+        //                   ServerChunkTaskScheduler scheduler, 
+        //                   Executor executor, 
+        //                   int maxEntityRenderDistance, 
+        //                   int simulationDistance, 
+        //                   boolean forceTickEmptyChunks)
+        
+        // Create ServerChunkCache (Paper 1.21 uses ServerChunkCache, not ServerChunkProvider)
+        
+        // Create the level with Paper's virtual thread support
         try {
-            // Add the world to the server's world list
-            ServerLevel serverLevel = createServerLevel(slimeWorld);
-            
-            if (serverLevel == null) {
-                return null;
-            }
+            net.minecraft.world.level.Level level = (net.minecraft.world.level.Level) LEVEL_CONSTRUCTOR.get().newInstance(
+                server,
+                server.registryAccess(),
+                server.getWorldData(),
+                dimKey,
+                new net.minecraft.server.level.ChunkTaskScheduler(),
+                2,  // fetchRadius
+                false, // shouldLoadSpawn
+                Collections.emptyList(),
+                Collections.emptyList() // structureGenerators
+            );
 
-            // Get the Bukkit World from the ServerLevel
-            MinecraftServer server = MinecraftServer.getServer();
-            if (server == null) {
-                return null;
+            if (level != null) {
+                server.addLevel(level);
+                return new CraftWorld(level.getWorld());
             }
-
-            // Add to server worlds
-            server.addLevel(serverLevel);
-            
-            // Convert to Bukkit world
-            return new CraftWorld(server.getWorld());
         } catch (Exception e) {
             throw new RuntimeException("Failed to create world: " + slimeWorld.getName(), e);
         }
+        return null;
     }
 
-    private ServerLevel createServerLevel(SlimeWorld slimeWorld) {
-        MinecraftServer server = MinecraftServer.getServer();
-        if (server == null) {
-            return null;
+    private net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> getDimensionKey(SlimeWorld slimeWorld) {
+        String env = slimeWorld.getPropertyMap().getStringProperty("environment", "NORMAL").toUpperCase();
+        switch (env) {
+            case "NETHER":
+                return net.minecraft.world.level.Level.NETHER;
+            case "END":
+                return net.minecraft.world.level.Level.END;
+            default:
+                return net.minecraft.world.level.Level.OVERWORLD;
         }
-
-        // Use reflection to find the ServerLevel constructor
-        java.lang.reflect.Constructor<ServerLevel> constructor = 
-            ServerLevel.class.getDeclaredConstructor(
-                MinecraftServer.class,
-                net.minecraft.resources.RegistryAccess.class,
-                net.minecraft.world.level.storage.WorldData.class,
-                net.minecraft.resources.ResourceKey.class,
-                net.minecraft.world.level.chunk.status.ChunkStatus.class,
-                java.util.concurrent.Executor.class,
-                java.util.concurrent.Executor.class,
-                net.minecraft.world.level.chunk.status.ChunkStatus.class,
-                boolean.class,
-                java.util.List.class,
-                long.class,
-                boolean.class,
-                java.util.List.class
-            );
-        constructor.setAccessible(true);
-        
-        return constructor.newInstance(
-            server,
-            server.registryAccess(),
-            null, // WorldData (will be populated from SlimeWorld)
-            net.minecraft.core.registries.Registries.LEVEL_STEM,
-            null, // ChunkStatus
-            null, // ChunkHolderMapHolder (null to use default)
-            java.util.concurrent.Executors.newFixedThreadPool(2), // Chunk task executor
-            java.util.concurrent.Executors.newFixedThreadPool(2), // Main thread pool
-            null, // ProgressListener (null to create default)
-            false, // shouldLoadSpawn
-            java.util.Collections.emptyList(), // BiomeContainers
-            0L, // random seed
-            true, // keepSpawnLoaded
-            java.util.Collections.emptyList() // CustomDimensions
-        );
     }
 
     @Override
-    public boolean supportsGeneration(String version) {
-        return version.startsWith("1.21");
+    public void generateWorld(SlimeWorld world) {
+        this.createWorld(world);
+    }
+
+    @Override
+    public void addWorldToServerList(Object worldObject) {
+        if (worldObject instanceof net.minecraft.world.level.Level) {
+            net.minecraft.server.MinecraftServer.getServer().addLevel((net.minecraft.world.level.Level) worldObject);
+        } else {
+            throw new IllegalArgumentException("worldObject must be a Level instance");
+        }
+    }
+
+    @Override
+    public com.grinderwolf.swm.api.world.SlimeWorld getSlimeWorld(World world) {
+        String worldName = world.getName();
+        try {
+            for (com.grinderwolf.swm.api.world.SlimeWorld sw : com.grinderwolf.swm.plugin.SWMPlugin.getInstance().getWorlds()) {
+                if (sw.getName().equals(worldName)) {
+                    return sw;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    @Override
+    public byte getWorldVersion() {
+        return 12;
     }
 
     @Override
     public Object createNMSWorld(SlimeWorld world) {
-        // This is used for async world generation
-        // Returns the NMS ServerLevel object
         return createWorld(world);
-    }
-
-    @Override
-    public boolean isWorldLoaded(Object nmsWorld) {
-        if (!(nmsWorld instanceof ServerLevel)) {
-            return false;
-        }
-        
-        ServerLevel serverLevel = (ServerLevel) nmsWorld;
-        return MinecraftServer.getServer().worlds.contains(serverLevel);
-    }
-
-    @Override
-    public String getWorldName(Object nmsWorld) {
-        if (nmsWorld instanceof org.bukkit.World) {
-            return ((org.bukkit.World) nmsWorld).getName();
-        } else if (nmsWorld instanceof ServerLevel) {
-            return ((ServerLevel) nmsWorld).getWorld().getWorld().getName();
-        }
-        return "unknown";
-    }
-
-    @Override
-    public void addWorldToServerList(Object nmsWorld) {
-        if (nmsWorld instanceof ServerLevel) {
-            MinecraftServer.getServer().addLevel((ServerLevel) nmsWorld);
-        } else {
-            throw new IllegalArgumentException("nmsWorld must be a ServerLevel instance");
-        }
-    }
-
-    @Override
-    public org.bukkit.World getSlimeWorld(org.bukkit.World bukkitWorld) {
-        // Implementation would go here
-        return null;
     }
 }

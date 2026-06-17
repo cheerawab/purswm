@@ -17,6 +17,7 @@ dependencies {
     compileOnly("org.projectlombok:lombok:1.18.34")
     annotationProcessor("org.projectlombok:lombok:1.18.34")
     implementation("com.flowpowered:flow-nbt:2.0.0-1")
+    implementation("com.github.luben:zstd-jni:1.5.5-11")
 }
 
 tasks.withType<JavaCompile> {

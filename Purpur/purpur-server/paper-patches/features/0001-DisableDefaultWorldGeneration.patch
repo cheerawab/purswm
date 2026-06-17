@@ -3,12 +3,27 @@ From: Purswm Team <dev@purswm.org>
 Date: Thu, 18 Jun 2026 02:30:00 +0000
 Subject: [PATCH] Disable default world generation for Purswm
 
-SWM needs full control over world creation, disable vanilla world generation logic.
+This patch injects a flag into MinecraftServer to prevent the
+default Overworld/Nether/End from being generated at startup.
+SWM needs full control over world creation.
 
---- a/src/main/java/net/minecraft/server/MinecraftServer.java
-+++ b/src/main/java/net/minecraft/server/MinecraftServer.java
-@@ -245,6 +245,9 @@ public abstract class MinecraftServer extends ReEntrantLockExecutor implements
-     private final com.mojang.datafixers.DataFixer dataFixer;
+---
+ a/src/main/java/net/minecraft/server/MinecraftServer.java
++b/src/main/java/net/minecraft/server/MinecraftServer.java
+@@ -43,6 +43,7 @@ import net.minecraft.util.unit.DegreeUnit; // Purpur
+ import net.minecraft.util.thread.ThreadExecutor;
+ import net.minecraft.world.Difficulty;
+ import net.minecraft.world.Music;
++import net.minecraft.world.level.Level; // PURPUR-SWM
+ import net.minecraft.world.level.GameType;
+ import net.minecraft.world.level.LevelConfiguration;
+ import net.minecraft.world.level.LevelStorage;
+@@ -130,6 +131,9 @@ public abstract class MinecraftServer extends ReEntrantLockExecutor<CompletableF
+     public static net.minecraft.server.MinecraftServer server; // PURPUR - Allow server access via static method
+     // END PURPUR
++    private static boolean purswm_disableDefaultWorldGeneration = false; // PURPUR-SWM: Disable default world generation
++
 +    private static purswmDisableDefaultWorldGen = false; // PURPUR-SWM: 禁用預設世界生成
  
      // PURPUR-SWM: 靜態 Hook，供 SWM 控制世界初始化
+     private static final java.util.concurrent.atomic.AtomicReference<com.grinderwolf.swm.api.SlimeWorldManager> purswm_swmManager = new java.util.concurrent.atomic.AtomicReference<>(); // PURPUR-SWM

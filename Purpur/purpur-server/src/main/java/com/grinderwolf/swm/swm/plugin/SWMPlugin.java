@@ -17,6 +17,7 @@ import com.grinderwolf.swm.nms.v1_13_R1.v1_13_R1SlimeNMS;
 import com.grinderwolf.swm.nms.v1_13_R2.v1_13_R2SlimeNMS;
 import com.grinderwolf.swm.nms.v1_14_R1.v1_14_R1SlimeNMS;
 import com.grinderwolf.swm.nms.v1_15_R1.v1_15_R1SlimeNMS;
+import com.grinderwolf.swm.nms.v1_21.impl.V1_21_R1SlimeNMS;
 import com.grinderwolf.swm.nms.v1_8_R3.v1_8_R3SlimeNMS;
 import com.grinderwolf.swm.nms.v1_9_R1.v1_9_R1SlimeNMS;
 import com.grinderwolf.swm.nms.v1_9_R2.v1_9_R2SlimeNMS;
@@ -48,6 +49,7 @@ public class SWMPlugin extends JavaPlugin implements SlimePlugin {
     @Getter
     private SlimeNMS nms;
 
+    @Getter
     private final List<SlimeWorld> worlds = new ArrayList<>();
     private final ExecutorService worldGeneratorService = Executors.newFixedThreadPool(1);
     private boolean asyncWorldGen;
@@ -178,7 +180,7 @@ public class SWMPlugin extends JavaPlugin implements SlimePlugin {
             case "v1_15_R1":
                 return new v1_15_R1SlimeNMS();
             default:
-                throw new InvalidVersionException(nmsVersion);
+                return new V1_21_R1SlimeNMS();
         }
     }
 

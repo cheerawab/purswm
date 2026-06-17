@@ -20,7 +20,7 @@ public class PurswmPlugin extends JavaPlugin {
     
     private SlimeWorldManager swm;
     private final Map<String, String> worldTemplates = new HashMap<>();
-    private final Map<String, InstantceInfo> gameInstances = new HashMap<>();
+    private final Map<String, InstanceInfo> gameInstances = new HashMap<>();
     
     @Override
     public void onEnable() {
