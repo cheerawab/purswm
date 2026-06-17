@@ -1,0 +1,10 @@
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -_,6 +_,7 @@
+     private volatile ResourcePackRepository resourcePackRepository;
+     private volatile PlayerList playerList;
+     private volatile ServerPlayerGameMode playerGameMode;
++    private boolean purswmDisableDefaultWorldGen = false;
+     
+     protected MinecraftServer(Logger logger, Thread thread, DirectoryShare directoryShare, File file, DataFixer dataFixer,
+         ServerScoreboard scoreboard, PackageKey<LevelStem> packageKey) {

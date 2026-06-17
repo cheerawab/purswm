@@ -1,0 +1,17 @@
+name: PurswmPlugin
+authors: [Cheer_awab]
+main: org.purpurmc.purpur.api.PurswmPlugin
+version: 26.1.2.1-api
+api-version: 1.21
+softdepend: [SWM]
+
+commands:
+  purswm:
+    description: Purswm 主要命令
+    usage: /<command>
+    permission: purswm.command.purswm
+    permission-message: You do not have permission!
+
+permissions:
+  purswm.command.purswm:
+    default: op

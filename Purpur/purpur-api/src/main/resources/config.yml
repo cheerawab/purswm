@@ -1,0 +1,25 @@
+# Purswm 配置文件
+
+# 世界模板
+templates:
+  # 示例:
+  # skywars:
+  #   path: "worlds/templates/skywars.slime"
+  #   auto-load: false
+
+# 遊戲實例設置
+instances:
+  max-per-player: 1
+  cleanup-delay: 300 # 秒
+
+# 世界設置
+worlds:
+  auto-unload: true
+  save-on-unload: true
+
+# 日誌
+logging:
+  level: INFO
+  log-loads: true
+  log-unloads: true
+  log-instances: true

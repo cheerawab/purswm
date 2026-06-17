@@ -1,14 +1,13 @@
 # Purswm - Purpur 1.21.7 with integrated Slime World Manager
-# 原始 Purpur 和 SWM 源碼目錄不在倉庫中
+# 原始 Slime-World-Manager 目錄不在倉庫中
 
-# 原始的 Purpur 和 Slime-World-Manager 目錄
-Purpur/
-Slime-World-Manager/
-.purswm-workspace/
+# 未合併的原始 SWM 目錄 (僅保留本地開發)
+# 但 Purswm/Purpur/ 是合併後的代碼，需要追蹤
 
 # 構建輸出
 **/build/
 **/out/
+**/*.jar
 
 # IDE 文件
 *.iml
@@ -29,3 +28,6 @@ gradle-app.state
 
 # 本地依賴
 libs/
+
+# 原始 Slime-World-Manager (不在倉庫中)
+!Purpur/Slime-World-Manager/
