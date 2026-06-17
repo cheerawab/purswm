@@ -28,9 +28,17 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Fetch Gradle Wrapper Files
+      - name: Fetch Gradle Wrapper Files for Gradle 9
         run: |
           mkdir -p Purpur/gradle/wrapper
+          
+          # Download Gradle 9.0 snapshot wrapper
+          curl -fsSL "https://services.gradle.org/distributions/gradle-9.0.0-20250613183551+0000-bin.zip" -o gradle-9.zip 2>/dev/null || true
+          if [ -f gradle-9.zip ]; then
+            unzip -j gradle-9.zip "*/lib/gradle-launcher-*.jar" -d /tmp/gradle9 2>/dev/null || true
+          fi
+          
+          # Use Gradle 8.9 wrapper (compatible with paperweight 1.5.0)
           curl -fsSL https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar -o Purpur/gradle/wrapper/gradle-wrapper.jar
           curl -fsSL https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradlew -o Purpur/gradlew
           curl -fsSL https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradlew.bat -o Purpur/gradlew.bat

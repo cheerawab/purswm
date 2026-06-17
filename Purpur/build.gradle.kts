@@ -2,31 +2,31 @@ import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 
 plugins {
-    java // TODO java launcher tasks
-    id("io.papermc.paperweight.patcher") version "1.5.0"
+    java
+    id("io.papermc.paperweight.patcher") version "2.0.0-beta.17"
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 
 paperweight {
     upstreams.paper {
-        ref = providers.gradleProperty("paperCommit")
+        ref.set(providers.gradleProperty("paperCommit"))
 
         patchFile {
-            path = "paper-server/build.gradle.kts"
-            outputFile = file("purpur-server/build.gradle.kts")
-            patchFile = file("purpur-server/build.gradle.kts.patch")
+            path.set("paper-server/build.gradle.kts")
+            outputFile.set(file("purpur-server/build.gradle.kts"))
+            patchFile.set(file("purpur-server/build.gradle.kts.patch"))
         }
         patchFile {
-            path = "paper-api/build.gradle.kts"
-            outputFile = file("purpur-api/build.gradle.kts")
-            patchFile = file("purpur-api/build.gradle.kts.patch")
+            path.set("paper-api/build.gradle.kts")
+            outputFile.set(file("purpur-api/build.gradle.kts"))
+            patchFile.set(file("purpur-api/build.gradle.kts.patch"))
         }
         patchDir("paperApi") {
-            upstreamPath = "paper-api"
-            excludes = setOf("build.gradle.kts")
-            patchesDir = file("purpur-api/paper-patches")
-            outputDir = file("paper-api")
+            upstreamPath.set("paper-api")
+            excludes.set(setOf("build.gradle.kts"))
+            patchesDir.set(file("purpur-api/paper-patches"))
+            outputDir.set(file("paper-api"))
         }
     }
 }
@@ -43,7 +43,7 @@ subprojects {
 
     tasks.withType<JavaCompile> {
         options.encoding = Charsets.UTF_8.name()
-        options.release = 25
+        options.release = 21
         options.isFork = true
         options.compilerArgs.addAll(listOf("-Xlint:-deprecation", "-Xlint:-removal"))
     }
@@ -88,7 +88,7 @@ subprojects {
     dependencies {
         // Only add to purpur-server (index 1) since it needs flow-nbt and zstd
         if (project.name == "purpur-server") {
-            api("com.flowpowered:flow-nbt:2.0.0-1")
+            implementation("com.flowpowered:flow-nbt:2.0.0-1")
             implementation("com.github.luben:zstd-jni:1.5.5-11")
             compileOnly("org.projectlombok:lombok:1.18.30")
             annotationProcessor("org.projectlombok:lombok:1.18.30")
