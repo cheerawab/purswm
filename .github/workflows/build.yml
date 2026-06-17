@@ -2,16 +2,21 @@ name: Purswm Build
 
 on:
   push:
-    branches: [ master, main, dev ]
+    branches: [ master, main ]
     paths:
       - 'Purpur/**'
       - '.github/workflows/**'
   pull_request:
-    branches: [ master, main, dev ]
+    branches: [ master, main ]
     paths:
       - 'Purpur/**'
       - '.github/workflows/**'
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build'
+        required: true
+        default: 'master'
 
 jobs:
   build:
@@ -21,7 +26,7 @@ jobs:
         java: [ '21' ]
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup JDK ${{ matrix.java }}
@@ -29,44 +34,24 @@ jobs:
         with:
           java-version: '${{ matrix.java }}'
           distribution: 'temurin'
-          cache: 'gradle'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-
-      - name: Generate Gradle Wrapper
+      - name: Create Gradle Wrapper
         run: |
-          cd Purpur
-          gradle wrapper --gradle-version 8.9 --distribution-type all
+          curl -fsSL https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
+          curl -fsSL https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradlew -o gradlew
           chmod +x gradlew
 
-      - name: Build with Gradle
+      - name: Run Wrapper from Root
+        working-directory: Purpur
         run: |
-          cd Purpur
-          ./gradlew build --no-daemon --console=plain 2>&1 || true
+          ../gradlew tasks --all --no-daemon --console=plain 2>&1 | tail -200 || true
 
-      - name: Show full log on failure
-        if: failure()
-        run: cat Purpur/build.gradle.kts 2>/dev/null || echo "Config check done"
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-output
-          path: |
-            Purpur/purpur-*/build/libs/*.jar
-          if-no-files-found: ignore
-          retention-days: 7
-        continue-on-error: true
-
-      - name: Upload build report on failure
+      - name: Upload Build Report on Failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: build-report
+          name: gradle-tasks-report
           path: |
-            **/reports/**
-            **/logs/**
-            **/build.log
+            **/*.log
           if-no-files-found: ignore
           retention-days: 7
