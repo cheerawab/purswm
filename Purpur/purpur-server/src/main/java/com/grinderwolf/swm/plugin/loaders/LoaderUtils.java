@@ -1,19 +1,16 @@
 package com.grinderwolf.swm.plugin.loaders;
 
-import com.github.luben.zstd.Zstd;
-import com.flowpowered.nbt.*;
-import com.flowpowered.nbt.stream.NBTInputStream;
 import com.grinderwolf.swm.api.exceptions.CorruptedWorldException;
 import com.grinderwolf.swm.api.exceptions.NewerFormatException;
 import com.grinderwolf.swm.api.loaders.SlimeLoader;
-import com.grinderwolf.swm.api.utils.SlimeFormat;
 import com.grinderwolf.swm.api.world.SlimeChunk;
-import com.grinderwolf.swm.api.world.SlimeChunkSection;
 import com.grinderwolf.swm.api.world.SlimeWorld;
 import com.grinderwolf.swm.api.world.impl.CraftSlimeChunk;
+import com.grinderwolf.swm.api.world.impl.CraftSlimeChunkSection;
 import com.grinderwolf.swm.api.world.impl.CraftSlimeWorld;
 import com.grinderwolf.swm.api.world.properties.SlimePropertyMap;
 import com.grinderwolf.swm.plugin.log.Logging;
+import com.flowpowered.nbt.*;
 
 import java.io.*;
 import java.nio.ByteOrder;
@@ -44,54 +41,47 @@ public class LoaderUtils {
             DataInputStream input = new DataInputStream(bais);
 
             // Check SLIM format header
-            byte[] header = new byte[SlimeFormat.SLIME_HEADER.length];
+            byte[] header = new byte[11]; // SRF header size
             input.readFully(header);
 
-            if (!Arrays.equals(SlimeFormat.SLIME_HEADER, header)) {
-                throw new CorruptedWorldException(worldName);
-            }
-
-            // Read magic number and version
+            // Read version
             byte version = input.readByte();
-            if (version > SlimeFormat.SLIME_VERSION) {
+            if (version > 12) {
                 throw new NewerFormatException(version);
             }
 
-            // Read world version
-            byte worldVersion = input.readByte();
-
-            // Read chunk coordinates
-            short minX = input.readShort();
-            short minZ = input.readShort();
-            short maxX = input.readShort();
-            short maxZ = input.readShort();
-
-            // Read chunk bitmask
-            int chunkBitsetSize = (((maxX - minX + 1) * (maxZ - minZ + 1) + 7) / 8);
-            byte[] chunkBitmaskBytes = readBytes(input, chunkBitsetSize);
-            BitSet chunkBitmask = BitSet.valueOf(chunkBitmaskBytes);
+            // Read low/high chunk coordinates
+            int minX = input.readShort() & 0xFFFF;
+            int minZ = input.readShort() & 0xFFFF;
+            int maxX = input.readShort() & 0xFFFF;
+            int maxZ = input.readShort() & 0xFFFF;
 
             Map<Long, SlimeChunk> chunks = new HashMap<>();
             Map<Integer, byte[]> paletteCache = new HashMap<>();
 
-            // Read chunk data
+            // Read chunks
             int compressedChunkLen = input.readInt();
             int chunkLen = input.readInt();
             byte[] compressedChunkData = readBytes(input, compressedChunkLen);
-            byte[] chunkData = Zstd.decompress(compressedChunkData);
+
+            // Decompress
+            byte[] chunkData = decompress(compressedChunkData);
 
             // Read chunks
             ByteArrayInputStream chunkBais = new ByteArrayInputStream(chunkData);
             DataInputStream chunkIn = new DataInputStream(chunkBais);
 
-            for (int i = 0; i < chunkBitmask.length(); i++) {
-                if (chunkBitmask.get(i)) {
-                    int chunkX = minX + (i % (maxX - minX + 1));
-                    int chunkZ = minZ + (i / (maxX - minX + 1));
+            int width = maxX - minX + 1;
+            int depth = maxZ - minZ + 1;
+
+            for (int i = 0; i < width * depth; i++) {
+                if (input.readBoolean()) { // Chunk exists bitmask
+                    int chunkX = minX + (i % width);
+                    int chunkZ = minZ + (i / depth);
 
                     try {
                         SlimeChunk chunk = deserializeChunk(
-                                chunkIn, version, worldVersion,
+                                chunkIn, version,
                                 chunkX, chunkZ, worldName, paletteCache
                         );
                         if (chunk != null) {
@@ -101,6 +91,8 @@ public class LoaderUtils {
                     } catch (Exception e) {
                         Logging.warning("Failed to deserialize chunk at " + chunkX + ", " + chunkZ, e);
                     }
+                } else {
+                    // Skip chunk data
                 }
             }
 
@@ -157,12 +149,11 @@ public class LoaderUtils {
     private static SlimeChunk deserializeChunk(
             DataInputStream input,
             byte version,
-            byte worldVersion,
             int chunkX,
             int chunkZ,
             String worldName,
             Map<Integer, byte[]> paletteCache
-    ) throws IOException, CorruptedWorldException {
+    ) throws IOException {
         SlimeChunkSection[] sections = new SlimeChunkSection[16];
 
         // Read section bitmask
@@ -171,7 +162,6 @@ public class LoaderUtils {
 
         for (int i = 0; i < 16; i++) {
             if (sectionBitmaskBits.get(i)) {
-                // Read block light
                 boolean hasBlockLight = input.readBoolean();
 
                 byte[] blockLight = null;
@@ -179,8 +169,7 @@ public class LoaderUtils {
                     blockLight = readBytes(input, 2048);
                 }
 
-                if (worldVersion >= 4) {
-                    // Read palette and block states (new format)
+                if (version >= 4) {
                     int paletteSize = input.readInt();
                     for (int p = 0; p < paletteSize; p++) {
                         int size = input.readInt();
@@ -192,12 +181,10 @@ public class LoaderUtils {
                         input.readLong();
                     }
                 } else {
-                    // Read old format blocks
                     input.skipBytes(4096);
                     input.skipBytes(2048);
                 }
 
-                // Read sky light
                 boolean hasSkyLight = input.readBoolean();
                 if (hasSkyLight) {
                     input.skipBytes(2048);
@@ -226,10 +213,15 @@ public class LoaderUtils {
     /**
      * Decompresses zstd data
      */
-    public static byte[] decompress(byte[] compressed) throws IOException {
+    public static byte[] decompress(byte[] compressed) {
         if (compressed == null || compressed.length == 0) {
             return new byte[0];
         }
-        return Zstd.decompress(compressed);
+        try {
+            return com.github.luben.zstd.Zstd.decompress(compressed);
+        } catch (Exception e) {
+            Logging.warning("Failed to decompress data", e);
+            throw e;
+        }
     }
 }

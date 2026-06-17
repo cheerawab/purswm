@@ -20,11 +20,6 @@ public class V1_21_R1SlimeNMS implements SlimeNMS {
     }
 
     @Override
-    public boolean supports(String minecraftVersion) {
-        return minecraftVersion.startsWith("1.21");
-    }
-
-    @Override
     public World createWorld(SlimeWorld slimeWorld) {
         try {
             // Add the world to the server's world list
@@ -44,7 +39,7 @@ public class V1_21_R1SlimeNMS implements SlimeNMS {
             server.addLevel(serverLevel);
             
             // Convert to Bukkit world
-            return new CraftWorld(serverLevel.getWorld());
+            return new CraftWorld(server.getWorld());
         } catch (Exception e) {
             throw new RuntimeException("Failed to create world: " + slimeWorld.getName(), e);
         }
@@ -56,51 +51,41 @@ public class V1_21_R1SlimeNMS implements SlimeNMS {
             return null;
         }
 
-        // This is a simplified implementation.
-        // In a real implementation, you would:
-        // 1. Create a dedicated chunk holder for slime chunks
-        // 2. Set up the world data from SlimeWorld
-        // 3. Ensure the world is compatible with Paper 1.21's world loading
-
-        try {
-            // Use reflection to find the ServerLevel constructor
-            java.lang.reflect.Constructor<ServerLevel> constructor = 
-                ServerLevel.class.getDeclaredConstructor(
-                    MinecraftServer.class,
-                    net.minecraft.resources.RegistryAccess.class,
-                    net.minecraft.world.level.storage.WorldData.class,
-                    net.minecraft.resources.ResourceKey.class,
-                    net.minecraft.world.level.chunk.LevelChunkStatus.class,
-                    java.util.concurrent.Executor.class,
-                    java.util.concurrent.Executor.class,
-                    net.minecraft.world.level.chunk.status.ChunkStatus.class,
-                    boolean.class,
-                    java.util.List.class,
-                    long.class,
-                    boolean.class,
-                    java.util.List.class
-                );
-            constructor.setAccessible(true);
-            
-            return constructor.newInstance(
-                server,
-                server.registryAccess(),
-                null, // WorldData (will be populated from SlimeWorld)
-                net.minecraft.core.registries.Registries.LEVEL_STEM,
-                null, // ChunkStatus
-                null, // ChunkHolderMapHolder (null to use default)
-                java.util.concurrent.Executors.newFixedThreadPool(2), // Chunk task executor
-                java.util.concurrent.Executors.newFixedThreadPool(2), // Main thread pool
-                null, // ProgressListener (null to create default)
-                false, // shouldLoadSpawn
-                java.util.Collections.emptyList(), // BiomeContainers
-                0L, // random seed
-                true, // keepSpawnLoaded
-                java.util.Collections.emptyList() // CustomDimensions
+        // Use reflection to find the ServerLevel constructor
+        java.lang.reflect.Constructor<ServerLevel> constructor = 
+            ServerLevel.class.getDeclaredConstructor(
+                MinecraftServer.class,
+                net.minecraft.resources.RegistryAccess.class,
+                net.minecraft.world.level.storage.WorldData.class,
+                net.minecraft.resources.ResourceKey.class,
+                net.minecraft.world.level.chunk.status.ChunkStatus.class,
+                java.util.concurrent.Executor.class,
+                java.util.concurrent.Executor.class,
+                net.minecraft.world.level.chunk.status.ChunkStatus.class,
+                boolean.class,
+                java.util.List.class,
+                long.class,
+                boolean.class,
+                java.util.List.class
             );
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create ServerLevel constructor", e);
-        }
+        constructor.setAccessible(true);
+        
+        return constructor.newInstance(
+            server,
+            server.registryAccess(),
+            null, // WorldData (will be populated from SlimeWorld)
+            net.minecraft.core.registries.Registries.LEVEL_STEM,
+            null, // ChunkStatus
+            null, // ChunkHolderMapHolder (null to use default)
+            java.util.concurrent.Executors.newFixedThreadPool(2), // Chunk task executor
+            java.util.concurrent.Executors.newFixedThreadPool(2), // Main thread pool
+            null, // ProgressListener (null to create default)
+            false, // shouldLoadSpawn
+            java.util.Collections.emptyList(), // BiomeContainers
+            0L, // random seed
+            true, // keepSpawnLoaded
+            java.util.Collections.emptyList() // CustomDimensions
+        );
     }
 
     @Override

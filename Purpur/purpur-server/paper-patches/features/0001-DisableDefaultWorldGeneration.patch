@@ -1,16 +1,14 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Purswm Team <purswm@example.com>
-Date: Wed, 17 Jun 2026 00:00:00 +0000
+From: Purswm Team <dev@purswm.org>
+Date: Thu, 18 Jun 2026 02:30:00 +0000
 Subject: [PATCH] Disable default world generation for Purswm
 
 SWM needs full control over world creation, disable vanilla world generation logic.
 
---- a/src/main/java/net/minecraft/world/level/MinecraftWorld.java
-+++ b/src/main/java/net/minecraft/world/level/MinecraftWorld.java
-@@ -234,6 +234,7 @@
-         this.worldServerData = worldServerData;
-+        this.disableDefaultGeneration = true; // PURPUR-SWM: 禁用預設世界生成
-     }
-
-     @Override
-
+--- a/src/main/java/net/minecraft/server/MinecraftServer.java
++++ b/src/main/java/net/minecraft/server/MinecraftServer.java
+@@ -245,6 +245,9 @@ public abstract class MinecraftServer extends ReEntrantLockExecutor implements
+     private final com.mojang.datafixers.DataFixer dataFixer;
++    private static purswmDisableDefaultWorldGen = false; // PURPUR-SWM: 禁用預設世界生成
+ 
+     // PURPUR-SWM: 靜態 Hook，供 SWM 控制世界初始化
