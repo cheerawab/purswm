@@ -1,0 +1,13 @@
+diff --git a/build.gradle.kts b/build.gradle.kts
+index 1234567..abcdefg 100644
+--- a/build.gradle.kts
++++ b/build.gradle.kts
+@@ -10,6 +10,9 @@ dependencies {
+     implementation("org.bukkit:craftbukkit:1.21.7-R0.1-SNAPSHOT")
+     implementation("io.papermc.paper:paper-api:1.21.7-R0.1-SNAPSHOT")
+     
++    implementation("com.flowpowered:flow-nbt:2.0.0-1")
++    implementation("com.github.luben:zstd-jni:1.5.5-11")
++    compileOnly("org.projectlombok:lombok:1.18.30")
++    annotationProcessor("org.projectlombok:lombok:1.18.30")
+ }
