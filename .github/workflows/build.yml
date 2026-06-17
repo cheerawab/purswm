@@ -1,38 +1,82 @@
-name: Build Purswm
+name: Purswm Build Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master, main, dev ]
+    paths:
+      - 'Purpur/**'
+      - '.github/workflows/**'
   pull_request:
-    branches: [ main ]
+    branches: [ master, main, dev ]
+    paths:
+      - 'Purpur/**'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: [ '21' ]
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup JDK 21
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Validate Gradle Wrapper
+        uses: gradle/wrapper-validation-action@v1
+
+      - name: Setup JDK ${{ matrix.java }}
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
-          distribution: temurin
-          
+          java-version: '${{ matrix.java }}'
+          distribution: 'temurin'
+          cache: 'gradle'
+
       - name: Grant execute permission for gradlew
         run: chmod +x Purpur/gradlew
-        
+
+      - name: Configure Git User
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "bot@users.noreply.github.com"
+
+      - name: Gradle Dependencies Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('Purpur/build.gradle.kts') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
       - name: Build with Gradle
-        run: cd Purpur && ./gradlew build --no-daemon
-        
-      - name: Upload Server JAR
+        run: cd Purpur && ./gradlew clean build --no-daemon --console=plain
+
+      - name: Check Build Output
+        run: cd Purpur && ls -la purpur-server/build/libs/ 2>/dev/null || echo "Building..."
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: purswm-server
-          path: Purpur/purpur-server/build/libs/*.jar
-          
-      - name: Upload API JAR
+          name: purswm-build-${{ github.sha }}
+          path: |
+            Purpur/purpur-api/build/libs/purswm-api-*.jar
+            Purpur/purpur-server/build/libs/purswm-server-*.jar
+            Purpur/purpur-server/build/libs/original-*.jar
+          if-no-files-found: ignore
+          retention-days: 14
+        continue-on-error: true
+
+      - name: Upload Failed Logs
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: purswm-api
-          path: Purpur/purpur-api/build/libs/*.jar
+          name: gradle-build-logs
+          path: |
+            **/build/reports/**
+            **/logs/**
+            .gradle/**/*.log
