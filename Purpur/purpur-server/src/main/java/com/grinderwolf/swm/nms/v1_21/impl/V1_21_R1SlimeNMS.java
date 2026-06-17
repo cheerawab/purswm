@@ -1,302 +1,339 @@
-package com.grinderwolf.swm.nms.v1_21.impl.nms;
+package com.grinderwolf.swm.nms.v1_21.impl;
 
-import com.grinderwolf.swm.api.SlimePlugin;
 import com.grinderwolf.swm.api.exceptions.SlimeException;
-import com.grinderwolf.swm.api.loaders.SlimeLoader;
 import com.grinderwolf.swm.api.world.SlimeWorld;
-import com.grinderwolf.swm.api.world.properties.SlimeProperty;
-import com.grinderwolf.swm.api.world.properties.SlimePropertyMap;
-import com.grinderwolf.swm.nms.SlimeNMS;
-import org.bukkit.World;
-import org.bukkit.craftbukkit.CraftWorld;
-import org.bukkit.craftbukkit.CraftServer;
-import org.bukkit.craftbukkit.util.CraftMagicNumbers;
-import org.bukkit.craftbukkit.world.CraftChunk;
-import org.bukkit.entity.Player;
-import org.bukkit.generator.ChunkGenerator;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.world.WorldType;
+import com.grinderwolf.swm.api.world.properties.SlimeProperties;
+import com.grinderwolf.swm.plugin.loaders.LoaderUtils;
+import com.grinderwolf.swm.plugin.loaders.file.FileLoader;
 
-import net.minecraft.core.BlockPos;
+import net.minecraft.Util;
 import net.minecraft.core.RegistryAccess;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
-import net.minecraft.resources.LayerKey;
-import net.minecraft.resources.RegistryKey;
+import net.minecraft.resources.FileToJsonConverter;
+import net.minecraft.resources.RegistryOps;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ChunkHolder;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.ChunkPos;
+import net.minecraft.server.level.progress.ChunkProgressListener;
+import net.minecraft.server.level.progress.ChunkProgressListenerFactory;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.biome.BigBiome;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.chunk.LevelChunkSection;
-import net.minecraft.world.level.chunk.ProtoChunk;
+import net.minecraft.world.level.chunk.status.ChunkBuildStatus;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
-import net.minecraft.world.level.dimension.DimensionType;
-import net.minecraft.world.level.levelgen.BlendedFeatureReceiver;
-import net.minecraft.world.level.saveddata.maps.MapData;
-import net.minecraft.world.level.storage.MainLevelStorage;
-import net.minecraft.world.level.storage.LevelStorageSource;
 
+import org.bukkit.Bukkit;
+import org.bukkit.World;
+import org.bukkit.craftbukkit.CraftServer;
+import org.bukkit.craftbukkit.CraftWorld;
+
+import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.logging.Level;
+import java.util.logging.LogManager;
+import java.util.logging.Logger;
 
 /**
- * v1_21 R1 NMS 實現
- * 負責將 SlimeWorld 轉換為 Minecraft 伺服器世界
+ * NMS implementation for Paper 1.21 (v1_21_R1)
+ * Implements SlimeNMS for Paper 1.21.7+
+ * 
+ * Note: This implementation creates a simplified version that focuses on the core
+ * functionality needed to load slime worlds and add them to the server.
+ * More sophisticated chunk loading and world generation will be added later.
  */
-public class V1_21_R1SlimeNMS implements SlimeNMS {
+public class V1_21_R1SlimeNMS implements com.grinderwolf.swm.nms.SlimeNMS {
     
-    private static final SlimeNMS INSTANCE = new V1_21_R1SlimeNMS();
+    public static final int WORLD_VERSION = 12;
     
-    public static SlimeNMS getInstance() {
-        return INSTANCE;
-    }
+    private static final Logger LOG = Logger.getLogger("SWM/NMS/v1_21");
     
-    private V1_21_R1SlimeNMS() {}
-    
-    @Override
-    public World loadWorld(String worldName, SlimeWorld slimeWorld, WorldType worldType, boolean hardcore) {
+    static {
         try {
-            MinecraftServer server = MinecraftServer.getServer();
-            if (server == null) {
-                throw new IllegalStateException("Server is not running!");
-            }
-            
-            CraftServer craftServer = server.server;
-            
-            // 創建 SlimeWorldCustom 實例
-            SlimeWorld slimeWorldCopy = slimeWorld;
-            
-            // 創建 ServerLevel
-            ServerLevel serverLevel = createServerLevel(
-                server,
-                worldName,
-                slimeWorldCopy,
-                worldType,
-                hardcore
-            );
-            
-            if (serverLevel == null) {
-                throw new SlimeException("Failed to create World");
-            }
-            
-            // 添加到 Server 世界列表
-            server.addLevel(serverLevel);
-            
-            // 創建 Bukkit World 包裝
-            World bukkitWorld = craftServer.addWorld(serverLevel, worldName);
-            
-            return bukkitWorld;
-            
-        } catch (Exception e) {
-            throw new SlimeException("Error loading world", e);
+            LogManager.getLogManager().readStream(Thread.currentThread().getContextClassLoader()
+                .getResourceAsStream("logging.properties"));
+        } catch (IOException e) {
+            // Ignore
         }
     }
     
-    /**
-     * 創建 ServerLevel 實例
-     */
-    private ServerLevel createServerLevel(
-        MinecraftServer server,
-        String worldName,
-        SlimeWorld slimeWorld,
-        WorldType worldType,
-        boolean hardcore
-    ) {
+    @Override
+    public int getWorldVersion() {
+        return WORLD_VERSION;
+    }
+    
+    @Override
+    public World createWorld(String worldName, SlimeWorld slimeWorld) {
         try {
-            Path worldPath = server.getWorldPath(new File(worldName));
+            MinecraftServer server = MinecraftServer.getServer();
+            if (server == null) {
+                LOG.severe("MinecraftServer is null - cannot create world");
+                return null;
+            }
             
-            // 創建 LevelStorageSource
-            LevelStorageSource.LevelStorageSourceConstructor storage =
-                new LevelStorageSource().createAccess(worldName, server.overworldType(), worldPath);
+            Path worldPath = getWorldPath(server, worldName);
+            LOG.info("Creating world at path: " + worldPath);
             
-            // 創建 ServerLevel 配置
-            SlimeWorldCustom slimeWorldCustom = new SlimeWorldCustom(
-                slimeWorld,
-                worldName,
-                worldType,
-                hardcore,
-                storage
-            );
+            // Get environment from properties or default to NORMAL
+            String envStr = slimeWorld.getProperties().getStringProperty(SlimeProperties.ENVIRONMENT, "NORMAL");
+            org.bukkit.World.Environment environment = org.bukkit.World.Environment.valueOf(envStr);
             
-            // 創建 ServerChunkCache
-            ServerChunkCache chunkProvider = createChunkProvider(
+            // Create ServerLevel for this world
+            ServerLevel serverLevel = createServerLevel(
                 server,
                 worldName,
+                worldPath,
+                environment,
                 slimeWorld
             );
             
-            // 創建 RegistryAccess
-            RegistryAccess.Frozen registryAccess = buildRegistryAccess(server, slimeWorld);
+            if (serverLevel == null) {
+                LOG.severe("Failed to create ServerLevel");
+                return null;
+            }
             
-            // 創建 ServerLevel
-            ServerLevel serverLevel = new ServerLevelCustom(
+            // Register the world with Bukkit through the scheduler
+            final ServerLevel finalServerLevel = serverLevel;
+            try {
+                org.bukkit.World bukkitWorld = com.google.common.util.concurrent.MoreExecutors
+                    .directExecutor()
+                    .map(Bukkit.getScheduler().runTask(
+                        Bukkit.getPluginManager().getPlugin("Purswm"),
+                        () -> {
+                            CraftServer craftServer = (CraftServer) Bukkit.getServer();
+                            return craftServer.addWorld(finalServerLevel, worldName);
+                        }
+                    ));
+                
+                if (bukkitWorld != null) {
+                    LOG.info("Successfully created world: " + worldName);
+                    return bukkitWorld;
+                }
+            } catch (Exception e) {
+                LOG.log(Level.SEVERE, "Error adding world to server", e);
+            }
+            
+            return null;
+            
+        } catch (Exception e) {
+            LOG.log(Level.SEVERE, "Error creating world: " + worldName, e);
+            throw new SlimeException("Failed to create world: " + worldName, e);
+        }
+    }
+    
+    private ServerLevel createServerLevel(
+        MinecraftServer server,
+        String worldName,
+        Path worldPath,
+        org.bukkit.World.Environment environment,
+        SlimeWorld slimeWorld
+    ) {
+        try {
+            // Create world data
+            net.minecraft.world.level.storage.PrimaryLevelData worldData = 
+                createPrimaryLevelData(worldName, environment);
+            
+            // Get dimension key
+            net.minecraft.resources.ResourceKey<Level> dimensionKey = getDimensionKey(environment);
+            
+            // Create chunk cache (simplified)
+            ServerChunkCache chunkProvider = new ServerChunkCache(
                 server,
-                server.executor,
-                storage,
-                registryAccess,
-                slimeWorldCustom.getDimensionType().access(),
-                chunkProvider,
-                slimeWorldCustom.getDimensionType(),
-                slimeWorldCustom.getDebugWorldScene(),
-                slimeWorldCustom.getRecipeTags(),
-                slimeWorldCustom.shouldGenerateFeatures()
+                worldData,
+                slimeWorld
             );
             
-            // 加載世界數據
-            loadWorldData(serverLevel, slimeWorld);
+            // Get registry access
+            RegistryAccess.Frozen registryAccess = server.registryAccess();
+            
+            // Create the ServerLevel
+            ServerLevel serverLevel = new ServerLevel(
+                server,
+                worldData.getLevelStorageAccess().dataFixer,
+                worldData.getLevelStorageAccess(),
+                registryAccess,
+                dimensionKey,
+                chunkProvider,
+                new ChunkProgressListenerFactory() {
+                    @Override
+                    public java.util.concurrent.CompletableFuture<ChunkProgressListener> create(
+                        String s, ChunkStatus chunkStatus) {
+                        return java.util.concurrent.CompletableFuture.completedFuture(
+                            new ChunkProgressListener() {
+                                @Override
+                                public void finishedBuildingChunk(ChunkBuildStatus chunkBuildStatus) {}
+                                
+                                @Override
+                                public void finishedLoadingChunk(int i, int i1) {}
+                                
+                                @Override
+                                public void progressChunkSourceTickStart(long l, long l1) {}
+                                
+                                @Override
+                                public void progressChunkSourceTickEnd() {}
+                                
+                                @Override
+                                public void startedBuildingChunk(java.util.concurrent.CompletableFuture<?> future) {}
+                                
+                                @Override
+                                public void setGenerationProgress(int i) {}
+                            }
+                        );
+                    }
+                },
+                false,
+                new net.minecraft.world.level.chunk.status.ChunkStatus[] {},
+                0L,
+                java.util.Collections.emptyList(),
+                null
+            );
             
             return serverLevel;
             
         } catch (Exception e) {
-            throw new SlimeException("Error creating ServerLevel", e);
+            LOG.log(Level.SEVERE, "Error creating ServerLevel", e);
+            throw e;
         }
     }
     
-    /**
-     * 創建 ChunkProvider
-     */
-    private ServerChunkCache createChunkProvider(
-        MinecraftServer server,
-        String worldName,
-        SlimeWorld slimeWorld
+    private net.minecraft.world.level.storage.PrimaryLevelData createPrimaryLevelData(
+        String worldName, 
+        org.bukkit.World.Environment environment
     ) {
-        int viewDistance = server.getIntProperty("view-distance", 10);
-        boolean verboseChunkLoading = server.getBooleanProperty("verbose", false);
+        // Create world settings
+        net.minecraft.world.level.LevelSettings settings = new net.minecraft.world.level.LevelSettings(
+            worldName,  // name
+            net.minecraft.world.level.GameType.SURVIVAL.getProtocolId(), // gameMode
+            false,      // customMapFeatures
+            false,      // debug
+            false,      // hardcore
+            org.bukkitDifficultyToMinecraft(
+                org.bukkit.Difficulty.NORMAL
+            ),  // difficulty
+            true,       // allowMonsters
+            true,       // allowAnimals
+            null        // oldLevelStorageLegacyLevel (deprecated)
+        );
         
-        return new ServerChunkCacheCustom(
-            server.server,
-            server.executor,
-            new LevelStorageSource.LevelStorageSourceConstructor() {
-                @Override
-                public Path getDirectory() { return null; }
-                @Override
-                public boolean isCustomDimension() { return true; }
-                @Override
-                public String getId() { return worldName; }
-            },
-            slimeWorld.getProperties().get(SlimePropertyMap.SPAWN_CHUNK_RADIUS),
-            viewDistance,
-            verboseChunkLoading,
-            server.getWorldGenSettings(),
-            server.reloadableRegistries,
-            null // 不執行任務
+        // Create primary level data
+        return new net.minecraft.world.level.storage.PrimaryLevelData(
+            settings,
+            net.minecraft.world.level.storage.PrimaryLevelData.DemoMode.OFF,
+            true  // reprocessing
         );
     }
     
-    /**
-     * 創建 registry 上下文
-     */
-    private RegistryAccess.Frozen buildRegistryAccess(
-        MinecraftServer server,
-        SlimeWorld slimeWorld
+    private net.minecraft.world.Diff BDifficulty getBukkitDifficulty(org.bukkit.Difficulty bukkitDiff) {
+        switch (bukkitDiff) {
+            case PEACEFUL: return net.minecraft.world.Difficulty.PEACEFUL;
+            case EASY:     return net.minecraft.world.Difficulty.EASY;
+            case NORMAL:   return net.minecraft.world.Difficulty.NORMAL;
+            case HARD:     return net.minecraft.world.Difficulty.HARD;
+            default:       return net.minecraft.world.Difficulty.NORMAL;
+        }
+    }
+    
+    private net.minecraft.world.Difficulty BDifficulty getMinecraftDifficulty(
+        org.bukkit.level.difficulty.BDifficulty fromDifficulty(org.bukkit.Difficulty diff) {
+        switch (diff) {
+            case PEACEFUL: return net.minecraft.world.Difficulty.PEACEFUL;
+            case EASY:     return net.minecraft.world.Difficulty.EASY;
+            case NORMAL:   return net.minecraft.world.Difficulty.NORMAL;
+            case HARD:     return net.minecraft.world.Difficulty.HARD;
+            default:       return net.minecraft.world.Difficulty.NORMAL;
+        }
+    }
+    
+    private net.minecraft.resources.ResourceKey<Level> getDimensionKey(
+        org.bukkit.World.Environment environment
     ) {
-        // 從伺服器獲取 registry 數據
-        RegistryAccess.Frozen frozen = server.registryAccess();
-        return frozen;
+        switch (environment) {
+            case NETHER:   return Level.NETHER;
+            case THE_END:  return Level.END;
+            default:       return Level.OVERWORLD;
+        }
     }
     
-    /**
-     * 從 Slime 數據加載 World 數據
-     */
-    private void loadWorldData(ServerLevel level, SlimeWorld slimeWorld) {
-        // TODO: 實現具體的世界數據加載邏輯
-        // 1. 加載 slime chunks
-        // 2. 設置 biome 數據
-        // 3. 加載 tile entities
-        // 4. 加載實體數據
+    private Path getWorldPath(MinecraftServer server, String worldName) {
+        return server.getWorldPath(new File(worldName));
     }
     
-    /**
-     * 從 SlimeChunk 創建 Chunk
-     */
-    public static LevelChunk createLevelChunk(
-        ServerLevel level,
-        com.grinderwolf.swm.api.world.SlimeChunk slimeChunk
+    @Override
+    public SlimeWorld getSlimeWorld(org.bukkit.World bukkitWorld) {
+        if (bukkitWorld instanceof CraftWorld) {
+            CraftWorld craftWorld = (CraftWorld) bukkitWorld;
+            ServerLevel nmsWorld = craftWorld.getHandle();
+            
+            // Check if this is a known slime world
+            for (com.grinderwolf.swm.api.world.SlimeWorld slimeWorld : 
+                com.grinderwolf.swm.util.LoaderUtils.getSlimeWorlds()) {
+                if (slimeWorld.getName().equals(bukkitWorld.getName())) {
+                    return slimeWorld;
+                }
+            }
+        }
+        return null;
+    }
+    
+    @Override
+    public void setDefaultWorlds(
+        com.grinderwolf.swm.api.world.SlimeWorld defaultWorld,
+        com.grinderwolf.swm.api.world.SlimeWorld nether,
+        com.grinderwolf.swm.api.world.SlimeWorld end
     ) {
-        ChunkPos chunkPos = new ChunkPos(slimeChunk.getX(), slimeChunk.getZ());
-        
-        // 創建 ProtoChunk (用於初始化)
-        ProtoChunk protoChunk = new ProtoChunk(chunkPos, level);
-        
-        // 設置 slime 數據
-        setSlimeData(protoChunk, slimeChunk);
-        
-        // 轉換為 LevelChunk
-        return protoChunk.getLevelChunk();
-    }
-    
-    /**
-     * 設置 slime chunk 數據
-     */
-    private static void setSlimeData(ProtoChunk chunk, com.grinderwolf.swm.api.world.SlimeChunk slimeChunk) {
-        // 設定高度圖數據
-        for (int x = 0; x < 16; x++) {
-            for (int z = 0; z < 16; z++) {
-                for (int y = 0; y < 256; y += 4) {
-                    // 從 NBT 數據重建 BlockState
-                    // TODO: 實現具體的 nbt -> blockstate 映射
-                }
-            }
+        // Configure default worlds
+        if (defaultWorld != null) {
+            LOG.info("Default world set to: " + defaultWorld.getName());
         }
-        
-        // 設置 tile entities
-        if (slimeChunk.hasTileEntities()) {
-            ListTag tileEntityTags = (ListTag) slimeChunk.getNbt().get("TileEntities");
-            if (tileEntityTags != null) {
-                for (int i = 0; i < tileEntityTags.size(); i++) {
-                    CompoundTag te = tileEntityTags.getCompound(i);
-                    // TODO: 設置 tile entity 到 chunk
-                }
-            }
+        if (nether != null) {
+            LOG.info("Nether world set to: " + nether.getName());
         }
-        
-        // 設置實體
-        if (slimeChunk.hasEntities()) {
-            ListTag entityTags = (ListTag) slimeChunk.getNbt().get("Entities");
-            if (entityTags != null) {
-                for (int i = 0; i < entityTags.size(); i++) {
-                    CompoundTag entityTag = entityTags.getCompound(i);
-                    // TODO: 創建實體
-                }
-            }
+        if (end != null) {
+            LOG.info("End world set to: " + end.getName());
         }
     }
     
-    /**
-     * 創建世界文件
-     */
-    public static void createWorldFile(String worldName, Path path) {
-        try {
-            // 創建基本文件結構
-            File levelDat = new File(path.toFile(), "level.dat");
-            File entities = new File(path.toFile(), "entities");
-            File playerdata = new File(path.toFile(), "playerdata");
-            File stats = new File(path.toFile(), "stats");
-            File region = new File(path.toFile(), "dimension");
-            
-            // 創建目錄
-            entities.mkdirs();
-            playerdata.mkdirs();
-            stats.mkdirs();
-            region.mkdirs();
-            
-            // 創建空 level.dat
-            if (!levelDat.exists()) {
-                levelDat.createNewFile();
-            }
-            
-        } catch (IOException e) {
-            throw new SlimeException("Error creating world files", e);
+    @Override
+    public void addWorldToServerList(Object nmsWorldObject) {
+        if (!(nmsWorldObject instanceof ServerLevel)) {
+            throw new IllegalArgumentException("Must provide a ServerLevel");
         }
+        
+        MinecraftServer server = MinecraftServer.getServer();
+        if (server != null) {
+            server.addLevel((ServerLevel) nmsWorldObject);
+            LOG.info("Added world to server list: " + ((ServerLevel) nmsWorldObject).dimension().location().getPath());
+        }
+    }
+    
+    @Override
+    public void generateWorld(com.grinderwolf.swm.api.world.SlimeWorld world) {
+        createWorld(world.getName(), world);
+    }
+    
+    /**
+     * SlimeChunkProvider - Extends ServerChunkCache to support SlimeWorld loading
+     * This is a placeholder that will be expanded later to actually load chunks from 
+     * the SlimeWorld data structure.
+     */
+    private static class SlimeChunkProvider {
+        private final MinecraftServer server;
+        private final net.minecraft.world.level.storage.PrimaryLevelData worldData;
+        private final SlimeWorld slimeWorld;
+        
+        public SlimeChunkProvider(
+            MinecraftServer server,
+            net.minecraft.world.level.storage.PrimaryLevelData worldData,
+            SlimeWorld slimeWorld
+        ) {
+            this.server = server;
+            this.worldData = worldData;
+            this.slimeWorld = slimeWorld;
+        }
+        
+        // Methods to load chunks from SlimeWorld...
+        // This will load chunks in the format required by Minecraft
     }
 }
