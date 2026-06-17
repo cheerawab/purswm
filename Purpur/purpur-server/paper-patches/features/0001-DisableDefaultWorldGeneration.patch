@@ -1,33 +1,16 @@
-From aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Mon Sep 17 00:00:00 2001
-From: Purswm <purswm@example.com>
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Purswm Team <purswm@example.com>
 Date: Wed, 17 Jun 2026 00:00:00 +0000
 Subject: [PATCH] Disable default world generation for Purswm
 
-SWM 需要完全控制世界創建，禁止原版世界生成邏輯。
+SWM needs full control over world creation, disable vanilla world generation logic.
 
---- a/src/main/java/net.minecraft.server/MinecraftServer.java
-+++ b/src/main/java/net.minecraft.server/MinecraftServer.java
-@@ -123,8 +123,11 @@ public class MinecraftServer extends ThreadHeartbeat implements
-     private long serverStart;
-+    private boolean purswmDisableWorldGen = true; // PURPUR-SWM: 禁用預設世界生成
-     
-     protected MinecraftServer(MinecraftServer minecraftServer, Executor executor, 
--        DataAccess dataAccess, WorldSessionDefinitions worldSessionDefinitions) {
-+        DataAccess dataAccess, WorldSessionDefinitions worldSessionDefinitions, boolean generateWorld) {
-         super("Server thread");
-         this.serverOwner = "Server";
-         this.console = new MinecraftServerDedicatedServer(this);
-+        this.purswmDisableWorldGen = !generateWorld; // PURPUR-SWM: 根據參數控制
-@@ -234,6 +237,13 @@ public class MinecraftServer extends ThreadHeartbeat implements
-         this.worldEnvironment = worldEnvironment;
+--- a/src/main/java/net/minecraft/world/level/MinecraftWorld.java
++++ b/src/main/java/net/minecraft/world/level/MinecraftWorld.java
+@@ -234,6 +234,7 @@
+         this.worldServerData = worldServerData;
++        this.disableDefaultGeneration = true; // PURPUR-SWM: 禁用預設世界生成
      }
- 
-+    // PURPUR-SWM: 添加無世界生成建構子
-+    public MinecraftServer(MinecraftServer minecraftServer, Executor executor,
-+        DataAccess dataAccess, WorldSessionDefinitions worldSessionDefinitions) {
-+        this(minecraftServer, executor, dataAccess, worldSessionDefinitions, false);
-+    }
-+
+
      @Override
-     public void addLevel(ServerLevel serverLevel) {
-         if (this.worlds.get(serverLevel.dimension().location().getPath()) == null) {
+
